@@ -5,12 +5,52 @@ import (
     "bytes"
     "math/rand"
     "io"
-
-    "container/list"
+    "bufio"
 )
 
+type textLexer struct {}
+func (lex textLexer) Next(b *bufio.Reader) (string, error) {
+    c, err := peekByte(b)
+    var buf bytes.Buffer
+
+    for ; err == nil && (isLetter(c) || c == '\''); c, err = peekByte(b) {
+        buf.WriteByte(c)
+        b.ReadByte()
+    }
+
+    if buf.Len() > 0 {
+        return buf.String(), nil
+    }
+
+    if err != nil {
+        return "", err
+    }
+
+    b.ReadByte()
+    if c == '.' || c == ',' || c == '-' {
+        return string([]byte{c}), nil
+    } else {
+        return "", nil
+    }
+}
+
+var TextLexer textLexer = textLexer{}
+
+func isLetter(c byte) bool {
+    return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
+}
+
+func peekByte(b *bufio.Reader) (byte, error) {
+    bytes, err := b.Peek(1)
+    if err != nil {
+        return 0, err
+    } else {
+        return bytes[0], nil
+    }
+}
+
 type Lexer interface {
-    Next() (string, error)
+    Next(*bufio.Reader) (string, error)
 }
 
 type entry struct {
@@ -25,11 +65,18 @@ type Markov struct {
     Order int
 }
 
-func (m *Markov) Add(first, second string) {
-    entries := m.States[first]
+const prefixSep = "\000"
+
+func getKey(prev []string) string {
+    return strings.Join(prev, prefixSep)
+}
+
+func (m *Markov) Add(prev []string, second string) {
+    key := getKey(prev)
+    entries := m.States[key]
     if entries == nil {
         entries = make([]*entry, 0, 1)
-        m.States[first] = entries
+        m.States[key] = entries
     }
 
     for _, e := range(entries) {
@@ -43,54 +90,35 @@ func (m *Markov) Add(first, second string) {
         Freq: 1,
         Word: second,
     }
-    m.States[first] = append(entries, &entry)
-}
-
-func isLetter(c byte) bool {
-    return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
+    m.States[key] = append(entries, &entry)
 }
 
 func CreateMarkov(src io.Reader, lex Lexer, order int) *Markov {
+    input := bufio.NewReader(src)
+
     m := Markov{States: make(map[string][]*entry)}
     m.Order = order
 
-    prev := list.New()
+    prev := make([]string, order)
     for i := 0; i < order; i++ {
-        prev.PushBack("")
+        prev[i] = ""
     }
 
-    for tok, err := lex.Next(src); err != nil {
+    for tok, err := lex.Next(input); err == nil; tok, err = lex.Next(input) {
         if tok == "" {
             continue
         }
 
-        var buf bytes.Buffer
-        for i < len(source) && isLetter(source[i]) {
-            buf.WriteByte(source[i])
-            i += 1
-        }
-        if buf.Len() > 0 {
-            word := buf.String()
-            m.Add(prev, word)
-            prev = word
-            continue
-        }
-        if i >= len(source) { break }
-
-        current := source[i]
-        if current != ' ' {
-            word := string([]byte{current})
-            m.Add(prev, word)
-            prev = word
-        }
-        i += 1
+        m.Add(prev, tok)
+        prev = append(prev[1:], tok)
     }
 
     return &m
 }
 
-func (m *Markov) Pick(word string) string {
-    entries := m.States[word]
+func (m *Markov) Pick(prefix []string) string {
+    key := getKey(prefix)
+    entries := m.States[key]
     if entries == nil {
         return ""
     }
@@ -109,26 +137,40 @@ func (m *Markov) Pick(word string) string {
         }
         curr += e.Freq
     }
-    return "ERR"
+    return ""
 }
 
-func (m *Markov) Generate(start string) string {
+func (m *Markov) Generate() string {
     var buf bytes.Buffer
-    prev := start
+
+    // pick a random starting prefix
+    var start string
+    for k, _ := range(m.States) {
+        start = k
+        break
+    }
+
+    arr := strings.Split(start, prefixSep)
+    first := true
     for {
-        word := m.Pick(prev)
+        word := m.Pick(arr)
         if word == "" {
             break
         }
-        if isLetter(word[0]) {
-            buf.WriteByte(' ')
+        if word != "," && word != "." {
+            if first {
+                first = false
+            } else {
+                buf.WriteString(" ")
+            }
         }
         buf.WriteString(word)
+
+        arr = append(arr[1:], word)
 
         if word == "." {
             break
         }
-        prev = word
     }
     return buf.String()
 }

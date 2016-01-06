@@ -5,37 +5,33 @@ import (
 
     "fmt"
     "os"
-    "io/ioutil"
+    "io"
     "math/rand"
     "time"
 )
 
 func main() {
     if len(os.Args) < 2 {
-        fmt.Printf("usage: %s [text file]\n", os.Args[0])
+        fmt.Printf("usage: %s [text files]\n", os.Args[0])
         os.Exit(-1)
     }
 
-    data, err := ioutil.ReadFile(os.Args[1])
-    if err != nil {
-        fmt.Println(err)
-        os.Exit(-1)
+    readers := make([]io.Reader, len(os.Args) - 1)
+    for i := 1; i < len(os.Args); i++ {
+        f, err := os.Open(os.Args[i])
+        if err != nil {
+            fmt.Println(err)
+            os.Exit(-1)
+        }
+        readers[i - 1] = f
     }
+    input := io.MultiReader(readers...)
 
     rand.Seed(time.Now().UTC().UnixNano())
 
-
-    m := markov.CreateMarkov(string(data))
-    /*
-    for k, v := range(m.States) {
-        fmt.Printf("'%s'\n", k)
-        for _, e := range(v) {
-            fmt.Printf("   '%s' -> %d\n", e.Word, e.Freq)
-        }
-    }
-    */
+    m := markov.CreateMarkov(input, markov.TextLexer, 2)
 
     for i := 0; i < 100; i++ {
-        fmt.Println(m.Generate("\n"))
+        fmt.Printf("> %s\n", m.Generate())
     }
 }
